@@ -1,6 +1,8 @@
 window.APP_CONFIG = {
-  SUPABASE_URL: 'PASTE_YOUR_PROJECT_URL_HERE',
-  SUPABASE_ANON_KEY: 'PASTE_YOUR_PUBLIC_ANON_KEY_HERE',
+  SUPABASE_URL: 'https://ftaksfqsduoppsmakvyk.supabase.co',
+
+  
+  SUPABASE_ANON_KEY: 'sb_publishable_lO3OdhYcQWVEgXaE58VfMQ_mHCf6Jz4',
   APP_NAME: 'Luplex'
 };
 // END OF FILE config.js
