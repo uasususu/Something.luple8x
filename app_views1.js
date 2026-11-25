@@ -27,7 +27,8 @@
     var bookHtml = '';
     if (mine) {
       bookHtml = '<div class="card muted">' + esc(t('l.own')) + '</div>' +
-        (l.status === 'RENTED' ? '<button class="btn warn" id="relist">' + esc(t('l.relist')) + '</button>' : '');
+        (l.status === 'RENTED' ? '<button class="btn warn" id="relist">' + esc(t('l.relist')) + '</button>' : '') +
+        '<div class="sp"></div><button class="btn danger" id="dellist">' + esc(t('l.delete')) + '</button>';
     } else if (l.status === 'AVAILABLE') {
       var maxUnits = { NIGHT: 365, MONTH: 36, YEAR: 10 }[l.period];
       bookHtml = '<div class="card"><h3>' + esc(t('l.book')) + '</h3>' +
@@ -40,8 +41,9 @@
       bookHtml = '<div class="card muted">' + esc(t('l.rented')) + '</div>';
     }
 
+    var detailHeart = (typeof l.liked === 'boolean') ? '<button class="heart ' + (l.liked ? 'on' : '') + '" data-like="' + esc(l.id) + '">' + icon('heart') + '</button>' : '';
     page('explore', l.title,
-      '<div class="gallery">' + gallery + '</div>' +
+      '<div class="imgwrap"><div class="gallery">' + gallery + '</div>' + detailHeart + '</div>' +
       '<div class="spread" style="margin-top:10px"><span class="price">' + esc(money(l.price_cents)) + ' / ' + esc(t('per.' + l.period)) + '</span><span class="muted">' + esc(cityLabel(l.city)) + '</span></div>' +
       '<p class="muted">' + esc(t('l.host')) + ': ' + esc(l.host_name) + (l.host_verified ? '<span class="badge">' + esc(t('l.verified')) + '</span>' : '') + '</p>' +
       '<p class="pre" style="margin:12px 0">' + esc(l.description) + '</p>' + contactHtml + bookHtml +
@@ -59,6 +61,15 @@
         if (!window.confirm(t('l.blockAsk'))) { return; }
         var ok = await guard(function () { return rpcVoid('block_user', { p_user_id: l.host_id }); });
         if (ok !== null) { history.back(); }
+      });
+    }
+    bindHearts(app);
+    var dl = $('#dellist');
+    if (dl) {
+      dl.addEventListener('click', async function () {
+        if (!window.confirm(t('l.deleteAsk'))) { return; }
+        var ok = await guard(function () { return rpcVoid('delete_my_listing', { p_listing_id: l.id }); });
+        if (ok) { toast(t('l.deleted')); state.cache = {}; history.back(); }
       });
     }
     var rel = $('#relist');
