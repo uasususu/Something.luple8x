@@ -25,7 +25,7 @@
   /* ---------- Profile ---------- */
   async function viewProfile() {
     page('profile', t('nav.profile'), '<p class="muted">' + esc(t('loading')) + '</p>');
-    var mine = await state.sb.from('listings').select('id,title,city,price_cents,period,status').eq('host_id', state.user.id).order('created_at', { ascending: false });
+    var mine = await state.sb.from('listings').select('id,title,city,price_cents,period,status').eq('host_id', state.user.id).neq('status', 'REMOVED').order('created_at', { ascending: false });
     var blocked = [];
     try { blocked = await rpc('my_blocked_users'); } catch (e) { blocked = []; }
     var strikes = null;
@@ -37,7 +37,7 @@
       (strikes ? '<p class="bad">' + esc(t('p.strikes', { n: strikes })) + '</p>' : '') + '</div>' +
       '<div class="card spread"><span>' + esc(t('p.language')) + '</span><button class="btn small ghost" id="lang">' + (lang === 'ar' ? 'English' : 'العربية') + '</button></div>' +
       '<h2>' + esc(t('p.myListings')) + '</h2>' + (listings.length ? listings.map(function (l) {
-        return '<div class="card click" data-ml="' + esc(l.id) + '"><div class="spread"><b>' + esc(l.title) + '</b><span class="badge ' + (l.status === 'AVAILABLE' ? '' : 'off') + '">' + esc(l.status) + '</span></div><div class="muted">' + esc(cityLabel(l.city)) + ' · ' + esc(money(l.price_cents)) + ' / ' + esc(t('per.' + l.period)) + '</div></div>';
+        return '<div class="card click" data-ml="' + esc(l.id) + '"><div class="spread"><b>' + esc(l.title) + '</b><span class="badge ' + (l.status === 'AVAILABLE' ? '' : 'off') + '">' + esc(l.status) + '</span></div><div class="muted">' + esc(cityLabel(l.city)) + ' · ' + esc(money(l.price_cents)) + ' / ' + esc(t('per.' + l.period)) + '</div><div class="row" style="margin-top:8px"><button class="btn small danger" data-del="' + esc(l.id) + '">' + esc(t('l.delete')) + '</button></div></div>';
       }).join('') : '<p class="muted">' + esc(t('p.none')) + '</p>') +
       '<h2>' + esc(t('p.blocked')) + '</h2>' + ((blocked && blocked.length) ? blocked.map(function (u) {
         return '<div class="card spread"><span>' + esc(u.full_name) + '</span><button class="btn small ghost" data-ub="' + esc(u.user_id) + '">' + esc(t('p.unblock')) + '</button></div>';
@@ -53,6 +53,14 @@
           all.forEach(function (r) { state.cache[r.id] = r; });
         } catch (e) { toast(errMsg(e)); }
         go('listing', { id: c.getAttribute('data-ml') });
+      });
+    });
+    $$('[data-del]').forEach(function (b) {
+      b.addEventListener('click', async function (e) {
+        e.stopPropagation();
+        if (!window.confirm(t('l.deleteAsk'))) { return; }
+        var ok = await guard(function () { return rpcVoid('delete_my_listing', { p_listing_id: b.getAttribute('data-del') }); });
+        if (ok) { toast(t('l.deleted')); state.cache = {}; viewProfile(); }
       });
     });
     $$('[data-ub]').forEach(function (b) {
@@ -187,6 +195,9 @@
   /* ---------- Boot ---------- */
   async function boot() {
     applyLang();
+    if (window.MutationObserver) {
+      new MutationObserver(function () { decorate(); }).observe(app, { childList: true, subtree: true });
+    }
     syncOffline();
     if (!cfg.SUPABASE_URL || cfg.SUPABASE_URL.indexOf('PASTE') === 0 || !cfg.SUPABASE_ANON_KEY || cfg.SUPABASE_ANON_KEY.indexOf('PASTE') === 0) {
       app.innerHTML = '<div class="card"><h2>' + esc(cfg.APP_NAME || 'Luplex') + '</h2><p>' + esc(t('setup')) + '</p></div>';
