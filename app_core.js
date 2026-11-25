@@ -88,7 +88,7 @@
 
   var state = {
     sb: null, user: null, profile: null, isAdmin: false, view: { name: 'explore', params: {} },
-    filters: { city: '', period: '', min: null, max: null }, cache: {}, timer: null
+    filters: { city: '', period: '', min: null, max: null, search: '', liked: false }, cache: {}, timer: null
   };
 
   async function rpc(name, args) {
@@ -117,10 +117,47 @@
     if (e.state && e.state.name) { state.view = e.state; renderView(); }
   });
 
+  function globalSearchHtml() {
+    return '<div class="searchbar" style="margin-bottom:10px"><input id="gq" type="search" placeholder="' + esc(t('explore.search')) + '"><button class="btn small" id="gqgo">' + esc(t('explore.go')) + '</button></div>';
+  }
+
+  function bindGlobalSearch() {
+    var inp = $('#gq'), btn = $('#gqgo');
+    if (!inp || !btn) { return; }
+    function run() {
+      var q = inp.value.trim();
+      if (!q) { return; }
+      state.filters = { city: '', period: '', min: null, max: null, search: q, liked: false };
+      go('explore');
+    }
+    btn.addEventListener('click', run);
+    inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { run(); } });
+  }
+
+  function bindHearts(root) {
+    $$('[data-like]', root).forEach(function (b) {
+      if (b.getAttribute('data-bound')) { return; }
+      b.setAttribute('data-bound', '1');
+      b.addEventListener('click', async function (e) {
+        e.stopPropagation();
+        e.preventDefault();
+        var id = b.getAttribute('data-like');
+        var res = await guard(function () { return rpc('toggle_like', { p_listing_id: id }); });
+        if (res === null) { return; }
+        b.classList.toggle('on', res === true);
+        if (state.cache[id]) { state.cache[id].liked = res === true; }
+        if (!res && state.filters.liked) {
+          var card = b.closest('.listing');
+          if (card) { card.remove(); }
+        }
+      });
+    });
+  }
+
   function navHtml(active) {
-    var items = [['explore', 'nav.explore'], ['bookings', 'nav.bookings'], ['wallet', 'nav.wallet'], ['profile', 'nav.profile']];
+    var items = [['explore', 'nav.explore', 'pin'], ['bookings', 'nav.bookings', 'calendar'], ['wallet', 'nav.wallet', 'wallet'], ['profile', 'nav.profile', 'user']];
     return '<nav>' + items.map(function (it) {
-      return '<button data-nav="' + it[0] + '" class="' + (active === it[0] ? 'on' : '') + '">' + esc(t(it[1])) + '</button>';
+      return '<button data-nav="' + it[0] + '" class="' + (active === it[0] ? 'on' : '') + '">' + icon(it[2]) + '<span>' + esc(t(it[1])) + '</span></button>';
     }).join('') + '</nav>';
   }
 
@@ -128,7 +165,10 @@
     app.innerHTML =
       '<div class="top"><div class="row">' +
       (showBack ? '<button class="btn small ghost" id="backBtn">←</button>' : '') +
-      '<h1>' + esc(title) + '</h1></div></div>' + body + (state.user ? navHtml(active) : '');
+      '<h1>' + esc(title) + '</h1></div></div>' +
+      ((!showBack && state.user && (active === 'bookings' || active === 'wallet' || active === 'profile')) ? globalSearchHtml() : '') +
+      body + (state.user ? navHtml(active) : '');
+    bindGlobalSearch();
     $$('[data-nav]').forEach(function (b) {
       b.addEventListener('click', function () { go(b.getAttribute('data-nav')); });
     });
@@ -242,9 +282,16 @@
 
   /* ---------- Explore ---------- */
   async function fetchListings(f) {
-    var res = await state.sb.rpc('list_listings', { p_city: f.city || null, p_period: f.period || null, p_min_cents: f.min, p_max_cents: f.max });
-    if (res.error && (res.error.code === 'PGRST202' || /Could not find the function/i.test(res.error.message || ''))) {
-      res = await state.sb.rpc('list_listings', { p_city: f.city || null });
+    var attempts = [
+      { p_city: f.city || null, p_period: f.period || null, p_min_cents: f.min, p_max_cents: f.max, p_search: f.search || null, p_only_liked: f.liked === true },
+      { p_city: f.city || f.search || null, p_period: f.period || null, p_min_cents: f.min, p_max_cents: f.max },
+      { p_city: f.city || f.search || null }
+    ];
+    var res = null;
+    for (var i = 0; i < attempts.length; i++) {
+      res = await state.sb.rpc('list_listings', attempts[i]);
+      var missing = res.error && (res.error.code === 'PGRST202' || /Could not find the function/i.test(res.error.message || ''));
+      if (!missing) { break; }
     }
     if (res.error) { throw res.error; }
     var rows = res.data || [];
@@ -254,8 +301,9 @@
 
   function cardHtml(l) {
     var img = l.images && l.images[0] ? '<img loading="lazy" src="' + esc(l.images[0]) + '" onerror="this.style.display=\'none\'">' : '';
+    var heart = (typeof l.liked === 'boolean') ? '<button class="heart ' + (l.liked ? 'on' : '') + '" data-like="' + esc(l.id) + '" aria-label="like">' + icon('heart') + '</button>' : '';
     var rating = l.avg_rating ? '★ ' + Number(l.avg_rating).toFixed(1) + ' (' + l.review_count + ')' : t('l.noRating');
-    return '<div class="card click listing" data-id="' + esc(l.id) + '">' + img +
+    return '<div class="card click listing" data-id="' + esc(l.id) + '"><div class="imgwrap">' + img + heart + '</div>' +
       '<div class="spread"><b>' + esc(l.title) + '</b><span class="price">' + esc(money(l.price_cents)) + ' / ' + esc(t('per.' + l.period)) + '</span></div>' +
       '<div class="muted">' + esc(cityLabel(l.city)) + ' · ' + esc(rating) + (l.status === 'RENTED' ? ' · ' + esc(t('l.rented')) : '') + '</div>' +
       '<div class="muted">' + esc(t('l.host')) + ': ' + esc(l.host_name) + (l.host_verified ? '<span class="badge">' + esc(t('l.verified')) + '</span>' : '') + '</div></div>';
@@ -264,13 +312,13 @@
   async function viewExplore() {
     var f = state.filters;
     page('explore', t('nav.explore'),
-      '<div class="searchbar"><input id="q" type="search" placeholder="' + esc(t('explore.search')) + '" value="' + esc(f.city) + '"><button class="btn small" id="qgo">' + esc(t('explore.go')) + '</button></div>' +
+      '<div class="searchbar"><input id="q" type="search" placeholder="' + esc(t('explore.search')) + '" value="' + esc(f.search) + '"><button class="btn small" id="qgo">' + esc(t('explore.go')) + '</button></div>' +
       '<div class="chips" id="chips"></div><div class="chips" id="periods"></div><div id="range"></div>' +
       '<div id="list" class="muted">' + esc(t('loading')) + '</div>' +
-      '<button class="fab" id="newl">+ ' + esc(t('explore.list')) + '</button>');
+      '<button class="fab" id="newl">' + esc(t('explore.list')) + '</button>');
 
     $('#newl').addEventListener('click', function () { go('create'); });
-    function runSearch() { f.city = $('#q').value.trim(); viewExplore(); }
+    function runSearch() { f.search = $('#q').value.trim(); viewExplore(); }
     $('#qgo').addEventListener('click', runSearch);
     $('#q').addEventListener('keydown', function (e) { if (e.key === 'Enter') { runSearch(); } });
 
@@ -281,6 +329,9 @@
     $$('[data-p]').forEach(function (b) {
       b.addEventListener('click', function () { f.period = b.getAttribute('data-p'); f.min = null; f.max = null; viewExplore(); });
     });
+
+    $('#periods').insertAdjacentHTML('beforeend', '<button class="chip ' + (f.liked ? 'on' : '') + '" id="savedChip">' + icon('heart') + esc(t('explore.saved')) + '</button>');
+    $('#savedChip').addEventListener('click', function () { f.liked = !f.liked; viewExplore(); });
 
     guard(async function () {
       try {
@@ -331,6 +382,7 @@
         if (!el) { return; }
         el.className = '';
         el.innerHTML = rows.length ? rows.map(cardHtml).join('') : '<p class="muted">' + esc(t('explore.none')) + '</p>';
+        bindHearts(el);
         $$('.listing', el).forEach(function (c) {
           c.addEventListener('click', function () { go('listing', { id: c.getAttribute('data-id') }); });
         });
