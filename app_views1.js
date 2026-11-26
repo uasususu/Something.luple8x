@@ -1,283 +1,393 @@
 'use strict';
 
-  /* ---------- Listing detail ---------- */
-  async function viewListing(p) {
-    page('explore', '', '<p class="muted">' + esc(t('loading')) + '</p>', true);
-    var l = state.cache[p.id];
-    if (!l) {
-      var rows = await guard(function () { return fetchListings({ city: '', period: '', min: null, max: null }); });
-      l = (rows || []).filter(function (x) { return x.id === p.id; })[0];
-    }
-    if (!l) { page('explore', t('err.LISTING_NOT_FOUND'), '', true); return; }
-    var mine = l.host_id === state.user.id;
-    var contact = [];
-    var reviews = [];
-    try { contact = await rpc('host_contact', { p_listing_id: l.id }); } catch (e) { contact = []; }
-    try { reviews = await rpc('list_reviews', { p_listing_id: l.id }); } catch (e) { reviews = []; }
-    var gallery = (l.images || []).map(function (u) { return '<img src="' + esc(u) + '" onerror="this.style.display=\'none\'">'; }).join('');
-    var contactHtml = contact && contact.length
-      ? '<div class="card"><b>' + esc(t('l.contact')) + '</b><p>' + esc(contact[0].full_name) + '</p><p>' + esc(contact[0].email) + '</p><p dir="ltr">' + esc(contact[0].phone) + '</p></div>'
-      : '<div class="card muted"><b>' + esc(t('l.contact')) + '</b><br>' + esc(t('l.contactHidden')) + '</div>';
-    var revHtml = reviews && reviews.length ? reviews.map(function (r) {
-      return '<div class="card"><div class="spread"><b>' + esc(r.author_name) + '</b><span>' + '★'.repeat(r.rating) + '</span></div><p class="pre">' + esc(r.body) + '</p>' +
-        (r.status === 'PENDING_HOLD' ? '<p class="muted">' + esc(t('r.pending')) + '</p>' : '') +
-        (!r.is_mine ? '<button class="btn small ghost" data-rr="' + esc(r.id) + '">' + esc(t('l.report')) + '</button>' : '') + '</div>';
-    }).join('') : '<p class="muted">' + esc(t('l.noReviews')) + '</p>';
+  var cfg = window.APP_CONFIG || {};
+  var app = document.getElementById('app');
 
-    var bookHtml = '';
-    if (mine) {
-      bookHtml = '<div class="card muted">' + esc(t('l.own')) + '</div>' +
-        (l.status === 'RENTED' ? '<button class="btn warn" id="relist">' + esc(t('l.relist')) + '</button>' : '') +
-        '<div class="sp"></div><button class="btn danger" id="dellist">' + esc(t('l.delete')) + '</button>';
-    } else if (l.status === 'AVAILABLE') {
-      var maxUnits = { NIGHT: 365, MONTH: 36, YEAR: 10 }[l.period];
-      bookHtml = '<div class="card"><h3>' + esc(t('l.book')) + '</h3>' +
-        '<label>' + esc(t('l.start')) + '</label><input type="date" id="bstart" min="' + cairoToday() + '" value="' + cairoToday() + '">' +
-        '<label>' + esc(t('l.units')) + ' (' + esc(t('per.' + l.period)) + ', 1-' + maxUnits + ')</label><input type="number" id="bunits" min="1" max="' + maxUnits + '" value="1">' +
-        '<div id="quote" class="muted" style="margin-top:10px"></div>' +
-        '<p class="muted" style="margin-top:8px">' + esc(t('l.escrowNote')) + '</p>' +
-        '<div class="sp"></div><button class="btn" id="bgo" style="width:100%" disabled>' + esc(t('l.confirmBook')) + '</button></div>';
-    } else {
-      bookHtml = '<div class="card muted">' + esc(t('l.rented')) + '</div>';
-    }
+  var CITIES = [
+    ['Cairo', 'القاهرة'], ['Giza', 'الجيزة'], ['Alexandria', 'الإسكندرية'], ['New Cairo', 'القاهرة الجديدة'],
+    ['6th of October', 'السادس من أكتوبر'], ['Sheikh Zayed', 'الشيخ زايد'], ['North Coast', 'الساحل الشمالي'],
+    ['Ain Sokhna', 'العين السخنة'], ['Hurghada', 'الغردقة'], ['Sharm El Sheikh', 'شرم الشيخ'], ['Dahab', 'دهب'],
+    ['Marsa Alam', 'مرسى علم'], ['Luxor', 'الأقصر'], ['Aswan', 'أسوان'], ['Port Said', 'بورسعيد'],
+    ['Mansoura', 'المنصورة'], ['Tanta', 'طنطا'], ['Other', 'أخرى']
+  ];
 
-    var detailHeart = (typeof l.liked === 'boolean') ? '<button class="heart ' + (l.liked ? 'on' : '') + '" data-like="' + esc(l.id) + '">' + icon('heart') + '</button>' : '';
-    page('explore', l.title,
-      '<div class="imgwrap"><div class="gallery">' + gallery + '</div>' + detailHeart + '</div>' +
-      '<div class="spread" style="margin-top:10px"><span class="price">' + esc(money(l.price_cents)) + ' / ' + esc(t('per.' + l.period)) + '</span><span class="muted">' + esc(cityLabel(l.city)) + '</span></div>' +
-      '<p class="muted">' + esc(t('l.host')) + ': ' + esc(l.host_name) + (l.host_verified ? '<span class="badge">' + esc(t('l.verified')) + '</span>' : '') + '</p>' +
-      '<p class="pre" style="margin:12px 0">' + esc(l.description) + '</p>' + contactHtml + bookHtml +
-      (!mine ? '<div class="row" style="margin-top:10px"><button class="btn small ghost" id="rep">' + esc(t('l.report')) + '</button><button class="btn small danger" id="blk">' + esc(t('l.block')) + '</button></div>' : '') +
-      '<h2>' + esc(t('l.reviews')) + '</h2>' + revHtml, true);
 
-    $$('[data-rr]').forEach(function (b) {
-      b.addEventListener('click', function () { doReport('REVIEW', b.getAttribute('data-rr')); });
-    });
-    var rep = $('#rep');
-    if (rep) { rep.addEventListener('click', function () { doReport('LISTING', l.id); }); }
-    var blk = $('#blk');
-    if (blk) {
-      blk.addEventListener('click', async function () {
-        if (!window.confirm(t('l.blockAsk'))) { return; }
-        var ok = await guard(function () { return rpcVoid('block_user', { p_user_id: l.host_id }); });
-        if (ok !== null) { history.back(); }
-      });
-    }
-    bindHearts(app);
-    var dl = $('#dellist');
-    if (dl) {
-      dl.addEventListener('click', async function () {
-        if (!window.confirm(t('l.deleteAsk'))) { return; }
-        var ok = await guard(function () { return rpcVoid('delete_my_listing', { p_listing_id: l.id }); });
-        if (ok) { toast(t('l.deleted')); state.cache = {}; history.back(); }
-      });
-    }
-    var rel = $('#relist');
-    if (rel) {
-      rel.addEventListener('click', async function () {
-        var ok = await guard(function () { return rpcVoid('relist_listing', { p_listing_id: l.id }); });
-        if (ok !== null) { toast(t('b.relisted')); delete state.cache[l.id]; viewListing(p); }
-      });
-    }
-
-    var bgo = $('#bgo');
-    if (bgo) {
-      var lastQuote = null;
-      var refreshQuote = async function () {
-        bgo.disabled = true;
-        var units = parseInt($('#bunits').value, 10);
-        var start = $('#bstart').value;
-        var q = await guard(function () { return rpc('quote_booking', { p_listing_id: l.id, p_units: units, p_starts_on: start }); });
-        var box = $('#quote');
-        if (!q || !q[0]) { box.textContent = ''; return; }
-        lastQuote = q[0];
-        box.innerHTML = '<div class="spread"><span>' + esc(t('l.total')) + '</span><b>' + esc(money(lastQuote.total_cents)) + '</b></div>' +
-          '<div class="spread"><span>' + esc(t('l.fee')) + ' (' + lastQuote.fee_percent + '%)</span><span>' + esc(money(lastQuote.fee_cents)) + '</span></div>' +
-          '<div class="spread"><span>' + esc(t('l.escrow')) + '</span><span>' + esc(money(lastQuote.escrow_cents)) + '</span></div>' +
-          '<div class="spread"><span>' + esc(t('b.dates', { a: fmtDate(lastQuote.starts_on), b: fmtDate(lastQuote.ends_on) })) + '</span></div>' +
-          '<div class="spread"><span>' + esc(t('l.wallet')) + '</span><span class="' + (lastQuote.can_afford ? 'good' : 'bad') + '">' + esc(money(lastQuote.wallet_cents)) + '</span></div>' +
-          (lastQuote.can_afford ? '' : '<p class="bad">' + esc(t('l.cantAfford')) + '</p>');
-        bgo.disabled = !lastQuote.can_afford;
-      };
-      $('#bunits').addEventListener('change', refreshQuote);
-      $('#bstart').addEventListener('change', refreshQuote);
-      refreshQuote();
-      bgo.addEventListener('click', async function () {
-        bgo.disabled = true;
-        var id = await guard(function () {
-          return rpc('book_listing', { p_listing_id: l.id, p_units: parseInt($('#bunits').value, 10), p_starts_on: $('#bstart').value });
-        });
-        if (id) { toast(t('l.booked')); delete state.cache[l.id]; go('bookings', {}, true); } else { bgo.disabled = false; refreshQuote(); }
-      });
-    }
+  var lang = 'en';
+  try {
+    var saved = localStorage.getItem('lang');
+    lang = saved || ((navigator.language || 'en').toLowerCase().indexOf('ar') === 0 ? 'ar' : 'en');
+  } catch (e) {
+    lang = (navigator.language || 'en').toLowerCase().indexOf('ar') === 0 ? 'ar' : 'en';
   }
 
-  async function doReport(type, id) {
-    var reason = window.prompt(t('l.reasonPrompt'));
-    if (reason === null) { return; }
-    var ok = await guard(function () { return rpc('report_content', { p_target_type: type, p_target_id: id, p_reason: reason }); });
-    if (ok) { toast(t('l.reported')); }
+  function t(key, vars) {
+    var s = (I18N[lang] && I18N[lang][key]) || I18N.en[key] || key;
+    if (vars) {
+      Object.keys(vars).forEach(function (k) { s = s.split('{' + k + '}').join(vars[k]); });
+    }
+    return s;
   }
 
-  /* ---------- Create listing ---------- */
-  function viewCreate() {
-    var cityOptions = CITIES.map(function (c) { return '<option value="' + esc(c[0]) + '">' + esc(lang === 'ar' ? c[1] : c[0]) + '</option>'; }).join('');
-    page('explore', t('explore.list'),
-      '<div class="card"><label>' + esc(t('c.title')) + '</label><input id="ctitle" maxlength="80">' +
-      '<label>' + esc(t('c.city')) + '</label><select id="ccity">' + cityOptions + '</select>' +
-      '<label>' + esc(t('c.desc')) + ' — <span id="wc">0</span> ' + esc(t('c.words')) + '</label><textarea id="cdesc"></textarea>' +
-      '<label>' + esc(t('c.period')) + '</label><select id="cper"><option value="NIGHT">' + esc(t('tab.NIGHT')) + '</option><option value="MONTH">' + esc(t('tab.MONTH')) + '</option><option value="YEAR">' + esc(t('tab.YEAR')) + '</option></select>' +
-      '<label>' + esc(t('c.price')) + '</label><input id="cprice" type="number" min="1" step="0.01" inputmode="decimal">' +
-      '<label>' + esc(t('c.photos')) + '</label><input id="cphotos" type="file" accept="image/*" multiple><div class="thumbs" id="thumbs"></div>' +
-      '<div class="sp"></div><button class="btn" id="cpub" style="width:100%">' + esc(t('c.publish')) + '</button><p class="muted" id="cstat"></p></div>', true);
+  function applyLang() {
+    document.documentElement.lang = lang;
+    document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+    document.title = cfg.APP_NAME || 'Luplex';
+    document.getElementById('offTitle').textContent = t('off.title');
+    document.getElementById('offMsg').textContent = t('off.msg');
+    document.getElementById('offRetry').textContent = t('retry');
+  }
 
-    $('#cdesc').addEventListener('input', function () {
-      var n = countWords($('#cdesc').value);
-      var el = $('#wc'); el.textContent = n; el.className = n > 399 ? 'bad' : '';
+  function esc(s) {
+    return String(s === null || s === undefined ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function money(cents) {
+    var n = Number(cents || 0) / 100;
+    return n.toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ' + t('currency');
+  }
+
+  function fmtDate(v) {
+    if (!v) { return ''; }
+    var d = new Date(v);
+    return d.toLocaleDateString(lang === 'ar' ? 'ar-EG' : 'en-GB', { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+
+  function fmtDateTime(v) {
+    var d = new Date(v);
+    return d.toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+  }
+
+  function cityLabel(c) {
+    for (var i = 0; i < CITIES.length; i++) {
+      if (CITIES[i][0].toLowerCase() === String(c).toLowerCase()) { return lang === 'ar' ? CITIES[i][1] : CITIES[i][0]; }
+    }
+    return c;
+  }
+
+  function cairoToday() {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo' }).format(new Date());
+  }
+
+  var toastTimer = null;
+  function toast(msg) {
+    var el = document.getElementById('toast');
+    el.textContent = msg;
+    el.style.display = 'block';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.style.display = 'none'; }, 4000);
+  }
+
+  function errMsg(error) {
+    var m = error && error.message ? String(error.message) : '';
+    var key = 'err.' + m.trim();
+    if (I18N.en[key]) { return t(key); }
+    return t('err.generic');
+  }
+
+  var state = {
+    sb: null, user: null, profile: null, isAdmin: false, view: { name: 'explore', params: {} },
+    filters: { city: '', period: '', min: null, max: null, search: '', liked: false }, cache: {}, timer: null
+  };
+
+  async function rpc(name, args) {
+    var res = await state.sb.rpc(name, args || {});
+    if (res.error) { throw res.error; }
+    return res.data;
+  }
+
+  async function rpcVoid(name, args) {
+    var res = await state.sb.rpc(name, args || {});
+    if (res.error) { throw res.error; }
+    return true;
+  }
+
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+
+  function go(name, params, replace) {
+    state.view = { name: name, params: params || {} };
+    var st = { name: name, params: params || {} };
+    if (replace) { history.replaceState(st, ''); } else { history.pushState(st, ''); }
+    renderView();
+  }
+
+  window.addEventListener('popstate', function (e) {
+    if (e.state && e.state.name) { state.view = e.state; renderView(); }
+  });
+
+  function globalSearchHtml() {
+    return '<div class="searchbar" style="margin-bottom:10px"><input id="gq" type="search" placeholder="' + esc(t('explore.search')) + '"><button class="btn small" id="gqgo">' + esc(t('explore.go')) + '</button></div>';
+  }
+
+  function bindGlobalSearch() {
+    var inp = $('#gq'), btn = $('#gqgo');
+    if (!inp || !btn) { return; }
+    function run() {
+      var q = inp.value.trim();
+      if (!q) { return; }
+      state.filters = { city: '', period: '', min: null, max: null, search: q, liked: false };
+      go('explore');
+    }
+    btn.addEventListener('click', run);
+    inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { run(); } });
+  }
+
+  function bindHearts(root) {
+    $$('[data-like]', root).forEach(function (b) {
+      if (b.getAttribute('data-bound')) { return; }
+      b.setAttribute('data-bound', '1');
+      b.addEventListener('click', async function (e) {
+        e.stopPropagation();
+        e.preventDefault();
+        var id = b.getAttribute('data-like');
+        var res = await guard(function () { return rpc('toggle_like', { p_listing_id: id }); });
+        if (res === null) { return; }
+        b.classList.toggle('on', res === true);
+        if (state.cache[id]) { state.cache[id].liked = res === true; }
+        if (!res && state.filters.liked) {
+          var card = b.closest('.listing');
+          if (card) { card.remove(); }
+        }
+      });
     });
-    $('#cphotos').addEventListener('change', function () {
-      var files = Array.prototype.slice.call($('#cphotos').files);
-      if (files.length > 11) { toast(t('c.maxPhotos')); $('#cphotos').value = ''; $('#thumbs').innerHTML = ''; return; }
-      $('#thumbs').innerHTML = files.map(function (f) { return '<img src="' + URL.createObjectURL(f) + '">'; }).join('');
+  }
+
+  function navHtml(active) {
+    var items = [['explore', 'nav.explore', 'pin'], ['bookings', 'nav.bookings', 'calendar'], ['wallet', 'nav.wallet', 'wallet'], ['profile', 'nav.profile', 'user']];
+    return '<nav>' + items.map(function (it) {
+      return '<button data-nav="' + it[0] + '" class="' + (active === it[0] ? 'on' : '') + '">' + icon(it[2]) + '<span>' + esc(t(it[1])) + '</span></button>';
+    }).join('') + '</nav>';
+  }
+
+  function page(active, title, body, showBack) {
+    app.innerHTML =
+      '<div class="top"><div class="row">' +
+      (showBack ? '<button class="btn small ghost" id="backBtn">←</button>' : '') +
+      '<h1>' + esc(title) + '</h1></div></div>' +
+      ((!showBack && state.user && (active === 'bookings' || active === 'wallet' || active === 'profile')) ? globalSearchHtml() : '') +
+      body + (state.user ? navHtml(active) : '');
+    bindGlobalSearch();
+    $$('[data-nav]').forEach(function (b) {
+      b.addEventListener('click', function () { go(b.getAttribute('data-nav')); });
     });
-    $('#cpub').addEventListener('click', async function () {
-      var btn = $('#cpub'), stat = $('#cstat');
-      var title = $('#ctitle').value.trim(), desc = $('#cdesc').value.trim();
-      var price = Math.round(parseFloat($('#cprice').value) * 100);
-      var files = Array.prototype.slice.call($('#cphotos').files);
-      if (title.length < 3 || desc === '' || !(price > 0)) { toast(t('c.fill')); return; }
-      if (countWords(desc) > 399) { toast(t('err.DESCRIPTION_TOO_LONG')); return; }
-      if (files.length < 1) { toast(t('c.noPhoto')); return; }
-      if (files.length > 11) { toast(t('c.maxPhotos')); return; }
+    var back = $('#backBtn');
+    if (back) { back.addEventListener('click', function () { history.back(); }); }
+  }
+
+  async function guard(fn) {
+    try { return await fn(); } catch (error) { toast(errMsg(error)); return null; }
+  }
+
+  function compressImage(file) {
+    return new Promise(function (resolve) {
+      (async function () {
+        var bitmap;
+        try {
+          try { bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+          catch (e) { bitmap = await createImageBitmap(file); }
+        } catch (e2) { resolve(null); return; }
+        var MAX = 300 * 1024, TARGET = 280 * 1024, side = 1200;
+        while (side >= 640) {
+          var scale = Math.min(1, side / Math.max(bitmap.width, bitmap.height));
+          var w = Math.max(1, Math.round(bitmap.width * scale));
+          var h = Math.max(1, Math.round(bitmap.height * scale));
+          var canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          var ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(bitmap, 0, 0, w, h);
+          var q = 0.70, blob = null;
+          while (q >= 0.40) {
+            blob = await new Promise(function (r) { canvas.toBlob(r, 'image/jpeg', q); });
+            if (!blob) { break; }
+            if (blob.size <= TARGET) { if (bitmap.close) { bitmap.close(); } resolve(blob); return; }
+            q -= 0.07;
+          }
+          if (blob && blob.size <= MAX) { if (bitmap.close) { bitmap.close(); } resolve(blob); return; }
+          side = Math.round(side * 0.85);
+        }
+        if (bitmap.close) { bitmap.close(); }
+        resolve(null);
+      })().catch(function () { resolve(null); });
+    });
+  }
+
+  function countWords(s) {
+    var x = String(s).trim();
+    return x === '' ? 0 : x.split(/\s+/).length;
+  }
+
+  /* ---------- Auth ---------- */
+  function viewAuth(mode) {
+    var signup = mode === 'signup';
+    app.innerHTML =
+      '<div class="top"><h1>' + esc(cfg.APP_NAME || 'Luplex') + '</h1><button class="btn small ghost" id="langBtn">' + (lang === 'ar' ? 'EN' : 'عربي') + '</button></div>' +
+      '<p class="muted">' + esc(t('auth.tagline')) + '</p>' +
+      '<div class="card"><h2>' + esc(signup ? t('auth.signup') : t('auth.login')) + '</h2>' +
+      (signup ? '<label>' + esc(t('auth.name')) + '</label><input id="name" autocomplete="name">' : '') +
+      '<label>' + esc(t('auth.email')) + '</label><input id="email" type="email" autocomplete="email">' +
+      (signup ? '<label>' + esc(t('auth.phone')) + '</label><input id="phone" type="tel" autocomplete="tel" placeholder="+20…">' : '') +
+      '<label>' + esc(t('auth.password')) + '</label><input id="pass" type="password" autocomplete="' + (signup ? 'new-password' : 'current-password') + '">' +
+      '<div class="sp"></div><button class="btn" id="go" style="width:100%">' + esc(signup ? t('auth.signup') : t('auth.login')) + '</button>' +
+      '<div class="sp"></div><button class="btn ghost" id="swap" style="width:100%">' + esc(signup ? t('auth.haveAccount') : t('auth.noAccount')) + '</button></div>';
+    $('#langBtn').addEventListener('click', function () { setLang(lang === 'ar' ? 'en' : 'ar'); viewAuth(mode); });
+    $('#swap').addEventListener('click', function () { viewAuth(signup ? 'login' : 'signup'); });
+    $('#go').addEventListener('click', async function () {
+      var btn = $('#go');
+      var email = $('#email').value.trim().toLowerCase();
+      var pass = $('#pass').value;
       btn.disabled = true;
       try {
-        var urls = [];
-        for (var i = 0; i < files.length; i++) {
-          stat.textContent = t('c.uploading', { n: i + 1, t: files.length });
-          var blob = await compressImage(files[i]);
-          if (!blob) { toast(t('c.badPhoto')); btn.disabled = false; stat.textContent = ''; return; }
-          var path = state.user.id + '/' + Date.now() + '_' + i + '.jpg';
-          var up = await state.sb.storage.from('listing-photos').upload(path, blob, { contentType: 'image/jpeg', upsert: false });
-          if (up.error) {
-            if (/size|large|maximum/i.test(up.error.message || '')) { up.error.message = 'PHOTO_TOO_LARGE'; }
-            throw up.error;
+        if (signup) {
+          var name = $('#name').value.trim();
+          var phone = $('#phone').value.replace(/[\s()-]/g, '');
+          if (name.length < 2 || name.length > 60 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/^\+?[0-9]{7,15}$/.test(phone) || pass.length < 6) {
+            toast(t('auth.invalid')); btn.disabled = false; return;
           }
-          urls.push(state.sb.storage.from('listing-photos').getPublicUrl(path).data.publicUrl);
+          var free = await rpc('check_phone_available', { p_phone: phone });
+          if (!free) { toast(t('auth.phoneTaken')); btn.disabled = false; return; }
+          var su = await state.sb.auth.signUp({ email: email, password: pass, options: { data: { full_name: name, phone: phone } } });
+          if (su.error) { toast(su.error.message); btn.disabled = false; return; }
+          if (!su.data.session) { toast(t('auth.checkEmail')); viewAuth('login'); return; }
+        } else {
+          var li = await state.sb.auth.signInWithPassword({ email: email, password: pass });
+          if (li.error) { toast(li.error.message); btn.disabled = false; return; }
         }
-        stat.textContent = '';
-        await rpc('create_listing', {
-          p_title: title, p_city: $('#ccity').value, p_description: desc,
-          p_period: $('#cper').value, p_price_cents: price, p_images: urls
-        });
-        toast(t('c.done'));
-        state.cache = {};
-        go('explore', {}, true);
+        await afterLogin();
       } catch (error) {
         toast(errMsg(error));
         btn.disabled = false;
-        stat.textContent = '';
       }
     });
   }
 
-  /* ---------- Bookings ---------- */
-  async function viewBookings() {
-    page('bookings', t('nav.bookings'), '<p class="muted">' + esc(t('loading')) + '</p>');
-    var rows = await guard(function () { return rpc('my_bookings'); });
-    if (rows === null) { return; }
-    var html = rows.length ? rows.map(function (b) {
-      var isRenter = b.my_role === 'RENTER';
-      var held = b.status === 'ESCROW_HELD';
-      var actions = '';
-      if (isRenter && held) { actions += '<button class="btn small" data-a="confirm" data-id="' + esc(b.id) + '">' + esc(t('b.confirm')) + '</button>'; }
-      if (held) { actions += '<button class="btn small warn" data-a="dispute" data-id="' + esc(b.id) + '">' + esc(t('b.dispute')) + '</button>'; }
-      actions += '<button class="btn small ghost" data-a="chat" data-id="' + esc(b.id) + '">' + esc(t('b.chat')) + '</button>';
-      if (isRenter) { actions += '<button class="btn small ghost" data-a="review" data-id="' + esc(b.id) + '">' + esc(t('b.review')) + '</button>'; }
-      if (!isRenter && (b.status === 'COMPLETED' || b.status === 'RESOLVED')) { actions += '<button class="btn small ghost" data-a="relist" data-lid="' + esc(b.listing_id) + '">' + esc(t('b.relist')) + '</button>'; }
-      return '<div class="card"><div class="spread"><b>' + esc(b.listing_title) + '</b><span class="badge ' + (held ? '' : 'off') + '">' + esc(t('b.status.' + b.status)) + '</span></div>' +
-        '<div class="muted">' + esc(t('b.role.' + b.my_role)) + ' · ' + esc(b.other_party_name) + '</div>' +
-        '<div class="muted">' + esc(t('b.dates', { a: fmtDate(b.starts_on), b: fmtDate(b.ends_on) })) + ' · ' + esc(b.units + ' ' + t('per.' + b.period)) + '</div>' +
-        '<div class="spread"><span>' + esc(t('l.total')) + ': <b>' + esc(money(b.total_cents)) + '</b></span><span class="muted">' + esc(t('l.escrow')) + ': ' + esc(money(b.escrow_cents)) + '</span></div>' +
-        (held ? '<div class="muted">' + esc(t('b.autoRelease', { d: fmtDate(b.release_at) })) + '</div>' : '') +
-        '<div class="row" style="margin-top:8px">' + actions + '</div></div>';
-    }).join('') : '<p class="muted">' + esc(t('b.none')) + '</p>';
-    page('bookings', t('nav.bookings'), html);
-    var byId = {};
-    rows.forEach(function (b) { byId[b.id] = b; });
-    $$('[data-a]').forEach(function (btn) {
-      btn.addEventListener('click', async function () {
-        var a = btn.getAttribute('data-a'), id = btn.getAttribute('data-id'), b = byId[id];
-        if (a === 'confirm') {
-          if (!window.confirm(t('b.confirmAsk'))) { return; }
-          var ok = await guard(function () { return rpcVoid('confirm_stay', { p_booking_id: id }); });
-          if (ok !== null) { toast(t('b.released')); viewBookings(); }
-        } else if (a === 'dispute') {
-          var reason = window.prompt(t('b.disputePrompt'));
-          if (reason === null) { return; }
-          var ok2 = await guard(function () { return rpc('open_dispute', { p_booking_id: id, p_reason: reason }); });
-          if (ok2) { toast(t('b.disputed')); viewBookings(); }
-        } else if (a === 'chat') {
-          go('chat', { id: id, title: b.listing_title, open: b.status === 'ESCROW_HELD' || b.status === 'DISPUTED' });
-        } else if (a === 'review') {
-          go('review', { id: id, title: b.listing_title });
-        } else if (a === 'relist') {
-          var ok3 = await guard(function () { return rpcVoid('relist_listing', { p_listing_id: btn.getAttribute('data-lid') }); });
-          if (ok3 !== null) { toast(t('b.relisted')); state.cache = {}; viewBookings(); }
-        }
-      });
-    });
+  function setLang(l) {
+    lang = l;
+    try { localStorage.setItem('lang', l); } catch (e) { /* storage unavailable */ }
+    applyLang();
   }
 
-  /* ---------- Chat ---------- */
-  function viewChat(p) {
-    page('bookings', p.title, '<div id="msgs"><p class="muted">' + esc(t('loading')) + '</p></div>' +
-      '<div id="composer"></div>', true);
-    var open = p.open;
-    async function load() {
-      var rows;
-      try { rows = await rpc('list_messages', { p_booking_id: p.id }); } catch (error) { return; }
-      var box = $('#msgs');
-      if (!box) { return; }
-      if (rows.length) { open = rows[0].chat_open; }
-      box.innerHTML = rows.length ? rows.map(function (m) {
-        return '<div class="msg ' + (m.is_mine ? 'me' : '') + '"><div class="muted" style="color:inherit;opacity:.7;font-size:12px">' + esc(m.sender_name) + ' · ' + esc(fmtDateTime(m.created_at)) + '</div>' + esc(m.body) + '</div>';
-      }).join('') : '<p class="muted">' + esc(t('ch.none')) + '</p>';
-      var comp = $('#composer');
-      if (open) {
-        if (!comp.firstChild) {
-          comp.innerHTML = '<div class="searchbar" style="margin-top:10px"><input id="mtext" maxlength="500" placeholder="' + esc(t('ch.placeholder')) + '"><button class="btn small" id="msend">' + esc(t('ch.send')) + '</button></div>';
-          var send = async function () {
-            var txt = $('#mtext').value.trim();
-            if (!txt) { return; }
-            var ok = await guard(function () { return rpc('send_message', { p_booking_id: p.id, p_body: txt }); });
-            if (ok) { $('#mtext').value = ''; load(); }
-          };
-          $('#msend').addEventListener('click', send);
-          $('#mtext').addEventListener('keydown', function (e) { if (e.key === 'Enter') { send(); } });
-        }
-      } else {
-        comp.innerHTML = '<p class="muted" style="margin-top:10px">' + esc(t('ch.closed')) + '</p>';
-      }
+  async function afterLogin() {
+    var s = await state.sb.auth.getSession();
+    if (!s.data.session) { viewAuth('login'); return; }
+    state.user = s.data.session.user;
+    var p = await state.sb.from('profiles').select('full_name,email,phone,created_at').eq('id', state.user.id).single();
+    state.profile = p.data || { full_name: '', email: state.user.email };
+    try { state.isAdmin = (await rpc('is_admin')) === true; } catch (e) { state.isAdmin = false; }
+    go('explore', {}, true);
+  }
+
+  /* ---------- Explore ---------- */
+  async function fetchListings(f) {
+    var attempts = [
+      { p_city: f.city || null, p_period: f.period || null, p_min_cents: f.min, p_max_cents: f.max, p_search: f.search || null, p_only_liked: f.liked === true },
+      { p_city: f.city || f.search || null, p_period: f.period || null, p_min_cents: f.min, p_max_cents: f.max },
+      { p_city: f.city || f.search || null }
+    ];
+    var res = null;
+    for (var i = 0; i < attempts.length; i++) {
+      res = await state.sb.rpc('list_listings', attempts[i]);
+      var missing = res.error && (res.error.code === 'PGRST202' || /Could not find the function/i.test(res.error.message || ''));
+      if (!missing) { break; }
     }
-    load();
-    state.timer = setInterval(load, 5000);
+    if (res.error) { throw res.error; }
+    var rows = res.data || [];
+    rows.forEach(function (r) { state.cache[r.id] = r; });
+    return rows;
   }
 
-  /* ---------- Review ---------- */
-  function viewReview(p) {
-    page('bookings', t('b.review') + ' — ' + p.title,
-      '<div class="card"><label>' + esc(t('r.rating')) + '</label><select id="rt"><option>5</option><option>4</option><option>3</option><option>2</option><option>1</option></select>' +
-      '<label>' + esc(t('r.text')) + '</label><textarea id="rtext" maxlength="500"></textarea><div class="sp"></div>' +
-      '<button class="btn" id="rsend" style="width:100%">' + esc(t('r.submit')) + '</button></div>', true);
-    $('#rsend').addEventListener('click', async function () {
-      var res = await guard(function () { return rpc('submit_review', { p_booking_id: p.id, p_rating: parseInt($('#rt').value, 10), p_body: $('#rtext').value }); });
-      if (res) {
-        var msg = t('r.sent');
-        if (res.masked) { msg += ' ' + t('r.masked'); }
-        if (res.strikes) { msg += ' ' + t('r.strike', { n: res.strikes }); }
-        toast(msg);
-        history.back();
-      }
-    });
+  function cardHtml(l) {
+    var img = l.images && l.images[0] ? '<img loading="lazy" src="' + esc(l.images[0]) + '" onerror="this.style.display=\'none\'">' : '';
+    var heart = (typeof l.liked === 'boolean') ? '<button class="heart ' + (l.liked ? 'on' : '') + '" data-like="' + esc(l.id) + '" aria-label="like">' + icon('heart') + '</button>' : '';
+    var rating = l.avg_rating ? '★ ' + Number(l.avg_rating).toFixed(1) + ' (' + l.review_count + ')' : t('l.noRating');
+    return '<div class="card click listing" data-id="' + esc(l.id) + '"><div class="imgwrap">' + img + heart + '</div>' +
+      '<div class="spread"><b>' + esc(l.title) + '</b><span class="price">' + esc(money(l.price_cents)) + ' / ' + esc(t('per.' + l.period)) + '</span></div>' +
+      '<div class="muted">' + esc(cityLabel(l.city)) + ' · ' + esc(rating) + (l.status === 'RENTED' ? ' · ' + esc(t('l.rented')) : '') + '</div>' +
+      '<div class="muted">' + esc(t('l.host')) + ': ' + esc(l.host_name) + (l.host_verified ? '<span class="badge">' + esc(t('l.verified')) + '</span>' : '') + '</div></div>';
   }
-// END OF FILE app_views1.js
+
+  async function viewExplore() {
+    var f = state.filters;
+    page('explore', t('nav.explore'),
+      '<div class="searchbar"><input id="q" type="search" placeholder="' + esc(t('explore.search')) + '" value="' + esc(f.search) + '"><button class="btn small" id="qgo">' + esc(t('explore.go')) + '</button></div>' +
+      '<div class="chips" id="chips"></div><div class="chips" id="periods"></div><div id="range"></div>' +
+      '<div id="list" class="muted">' + esc(t('loading')) + '</div>' +
+      '<button class="fab" id="newl">' + esc(t('explore.list')) + '</button>');
+
+    $('#newl').addEventListener('click', function () { go('create'); });
+    function runSearch() { f.search = $('#q').value.trim(); viewExplore(); }
+    $('#qgo').addEventListener('click', runSearch);
+    $('#q').addEventListener('keydown', function (e) { if (e.key === 'Enter') { runSearch(); } });
+
+    var periods = [['', t('explore.all')], ['NIGHT', t('tab.NIGHT')], ['MONTH', t('tab.MONTH')], ['YEAR', t('tab.YEAR')]];
+    $('#periods').innerHTML = periods.map(function (p) {
+      return '<button class="chip ' + (f.period === p[0] ? 'on' : '') + '" data-p="' + p[0] + '">' + esc(p[1]) + '</button>';
+    }).join('');
+    $$('[data-p]').forEach(function (b) {
+      b.addEventListener('click', function () { f.period = b.getAttribute('data-p'); f.min = null; f.max = null; viewExplore(); });
+    });
+
+    $('#periods').insertAdjacentHTML('beforeend', '<button class="chip ' + (f.liked ? 'on' : '') + '" id="savedChip">' + icon('heart') + esc(t('explore.saved')) + '</button>');
+    $('#savedChip').addEventListener('click', function () { f.liked = !f.liked; viewExplore(); });
+
+    guard(async function () {
+      try {
+        var cities = await rpc('list_cities');
+        $('#chips').innerHTML = '<button class="chip ' + (f.city === '' ? 'on' : '') + '" data-c="">' + esc(t('explore.all')) + '</button>' +
+          (cities || []).map(function (c) {
+            return '<button class="chip ' + (f.city.toLowerCase() === c.city.toLowerCase() ? 'on' : '') + '" data-c="' + esc(c.city) + '">' + esc(cityLabel(c.city)) + ' (' + c.listing_count + ')</button>';
+          }).join('');
+        $$('[data-c]').forEach(function (b) {
+          b.addEventListener('click', function () { f.city = b.getAttribute('data-c'); viewExplore(); });
+        });
+      } catch (e) { $('#chips').innerHTML = ''; }
+
+      try {
+        var pr = await rpc('price_range', { p_period: f.period || null });
+        var r = pr && pr[0];
+        if (r && r.min_cents !== null && r.max_cents !== null && r.max_cents > r.min_cents) {
+          var lo = Math.floor(r.min_cents / 100), hi = Math.ceil(r.max_cents / 100);
+          var curMin = f.min === null ? lo : Math.max(lo, Math.floor(f.min / 100));
+          var curMax = f.max === null ? hi : Math.min(hi, Math.ceil(f.max / 100));
+          var step = Math.max(1, Math.round((hi - lo) / 100));
+          $('#range').innerHTML = '<div class="card"><div class="spread"><b>' + esc(t('explore.price')) + '</b><span class="muted" id="rl"></span></div>' +
+            '<div class="range2"><input type="range" id="rmin" min="' + lo + '" max="' + hi + '" step="' + step + '" value="' + curMin + '"><input type="range" id="rmax" min="' + lo + '" max="' + hi + '" step="' + step + '" value="' + curMax + '"></div></div>';
+          var label = function () {
+            var a = Number($('#rmin').value), b = Number($('#rmax').value);
+            $('#rl').textContent = Math.min(a, b) + ' – ' + Math.max(a, b) + ' ' + t('currency');
+          };
+          label();
+          $('#rmin').addEventListener('input', label);
+          $('#rmax').addEventListener('input', label);
+          var apply = function () {
+            var a = Number($('#rmin').value), b = Number($('#rmax').value);
+            f.min = Math.min(a, b) * 100; f.max = Math.max(a, b) * 100;
+            loadList();
+          };
+          $('#rmin').addEventListener('change', apply);
+          $('#rmax').addEventListener('change', apply);
+        }
+      } catch (e) { $('#range').innerHTML = ''; }
+
+      await loadList();
+    });
+
+    async function loadList() {
+      await guard(async function () {
+        var rows = await fetchListings(f);
+        var el = $('#list');
+        if (!el) { return; }
+        el.className = '';
+        el.innerHTML = rows.length ? rows.map(cardHtml).join('') : '<p class="muted">' + esc(t('explore.none')) + '</p>';
+        bindHearts(el);
+        $$('.listing', el).forEach(function (c) {
+          c.addEventListener('click', function () { go('listing', { id: c.getAttribute('data-id') }); });
+        });
+      });
+    }
+  }
+// END OF FILE app_core.js
+    
